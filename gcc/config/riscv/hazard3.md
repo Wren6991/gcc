@@ -109,3 +109,96 @@
   "h3.xorsign\t%0,%1,%2"
   [(set_attr "type" "bitmanip")
    (set_attr "mode" "SI")])
+
+;; Recognise the standard abs() idiom
+;;
+;;   neg t, a        ; t = -a
+;;   max d, a, t     ; d = max(a, -a) = abs(a)
+;;
+;; and fold it into a single h3.xorsign, which computes abs(a) when its
+;; rs1 and rs2 are the same register.  Both orderings of the smax
+;; operands are accepted.
+;;
+;; Safety conditions:
+;;   - neg must not be of the form "neg a, a", since that destroys its
+;;     input and leaves the smax reading -a for both operands.
+;;   - the temporary t must not survive the transform.  It is either
+;;     clobbered by the smax (t == d, the case where the abs result is
+;;     written straight back into the temp) or, when t is a separate
+;;     register, it must be dead after the smax since h3.xorsign does
+;;     not read it.
+;;
+;; SImode only: h3.xorsign is a 32-bit instruction and the
+;; integer smax that feeds this pattern on RV32 is *smaxsi3.
+
+(define_peephole2
+  [(set (match_operand:SI 0 "register_operand")
+	(neg:SI (match_operand:SI 1 "register_operand")))
+   (set (match_operand:SI 2 "register_operand")
+	(smax:SI (match_operand:SI 3 "register_operand")
+		 (match_operand:SI 4 "register_operand")))]
+  "TARGET_XH3SFX
+   && REGNO (operands[0]) != REGNO (operands[1])
+   && ((REGNO (operands[3]) == REGNO (operands[1])
+	&& REGNO (operands[4]) == REGNO (operands[0]))
+       || (REGNO (operands[4]) == REGNO (operands[1])
+	   && REGNO (operands[3]) == REGNO (operands[0])))
+   && (REGNO (operands[0]) == REGNO (operands[2])
+       || peep2_reg_dead_p (2, operands[0]))"
+  [(set (match_dup 2)
+	(if_then_else:SI
+	  (lt:SI (match_dup 1) (const_int 0))
+	  (neg:SI (match_dup 1))
+	  (match_dup 1)))])
+
+;; Recognise the abs-of-difference idiom
+;;
+;;   sub t, a, b      ; t = a - b
+;;   sub u, b, a      ; u = b - a
+;;   max d, t, u      ; d = max(a - b, b - a) = abs(a - b)
+;;
+;; and fold it into sub + h3.xorsign, since h3.xorsign computes abs of
+;; its rs1/rs2 when they are the same register.  The first sub is kept
+;; and the second sub plus the smax are replaced by a single h3.xorsign
+;; of the first sub's result.
+;;
+;; Both orderings of the smax operands are accepted (it is commutative)
+;; and both orderings of the two subs are matched by swapping the a/b
+;; bindings, so only one pattern is needed.
+;;
+;; Safety conditions:
+;;   - the two sub destinations must be distinct, else the smax reads
+;;     the same value twice and the result is not abs.
+;;   - the first sub's destination must not alias either of its sources,
+;;     otherwise the second sub reads a modified input and does not
+;;     compute the opposite difference.
+;;   - the second sub's destination (the value we drop) must not
+;;     survive the transform: either the smax clobbers it (dst2 == d)
+;;     or it is dead after the smax.
+
+(define_peephole2
+  [(set (match_operand:SI 0 "register_operand")
+	(minus:SI (match_operand:SI 1 "register_operand")
+		  (match_operand:SI 2 "register_operand")))
+   (set (match_operand:SI 3 "register_operand")
+	(minus:SI (match_dup 2) (match_dup 1)))
+   (set (match_operand:SI 4 "register_operand")
+	(smax:SI (match_operand:SI 5 "register_operand")
+		 (match_operand:SI 6 "register_operand")))]
+  "TARGET_XH3SFX
+   && REGNO (operands[0]) != REGNO (operands[3])
+   && REGNO (operands[0]) != REGNO (operands[1])
+   && REGNO (operands[0]) != REGNO (operands[2])
+   && ((REGNO (operands[5]) == REGNO (operands[0])
+	&& REGNO (operands[6]) == REGNO (operands[3]))
+       || (REGNO (operands[5]) == REGNO (operands[3])
+	   && REGNO (operands[6]) == REGNO (operands[0])))
+   && (REGNO (operands[3]) == REGNO (operands[4])
+       || peep2_reg_dead_p (3, operands[3]))"
+  [(set (match_dup 0)
+	(minus:SI (match_dup 1) (match_dup 2)))
+   (set (match_dup 4)
+	(if_then_else:SI
+	  (lt:SI (match_dup 0) (const_int 0))
+	  (neg:SI (match_dup 0))
+	  (match_dup 0)))])
