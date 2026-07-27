@@ -5013,6 +5013,7 @@
 (include "thead.md")
 (include "corev.md")
 (include "andes.md")
+(include "hazard3.md")
 ;; Pipeline models
 (include "generic.md")
 (include "xiangshan.md")

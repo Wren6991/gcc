@@ -2102,3 +2102,4 @@ DEFINE_RISCV_EXT(
 #include "riscv-ext-mips.def"
 #include "riscv-ext-andes.def"
 #include "riscv-ext-spacemit.def"
+#include "riscv-ext-hazard3.def"

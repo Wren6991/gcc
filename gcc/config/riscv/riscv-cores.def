@@ -197,10 +197,10 @@ RISCV_CORE("spacemit-x60",    "rv64imafdcv_zba_zbb_zbc_zbs_zicboz_zicond_"
 			      "zbkc_zfh_zvfh_zvkt_zvl256b_sscofpmf_xsmtvdot",
 			      "spacemit-x60")
 RISCV_CORE("hazard3-rp2350",  "rv32ima_zicsr_zifencei_zba_zbb_zbs_zbkb_"
-			      "zca_zcb_zcmp",
+			      "zca_zcb_zcmp_xh3bextm",
 			      "hazard3")
 RISCV_CORE("hazard3-sim",     "rv32ima_zicsr_zifencei_zilsd_zba_zbb_zbs_zbkb_"
-			      "zbkx_zca_zcb_zclsd_zcmp_zibi",
+			      "zbkx_zca_zcb_zclsd_zcmp_zibi_xh3bextm_xh3sfx",
 			      "hazard3")
 
 #undef RISCV_CORE

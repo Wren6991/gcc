@@ -50,6 +50,9 @@ TargetVariable
 int riscv_xcv_subext
 
 TargetVariable
+int riscv_xh3_subext
+
+TargetVariable
 int riscv_xmips_subext
 
 TargetVariable
@@ -473,4 +476,8 @@ Mask(XANDESVPACKFPH) Var(riscv_xandes_subext)
 Mask(XANDESVDOT) Var(riscv_xandes_subext)
 
 Mask(XSMTVDOT) Var(riscv_xsmt_subext)
+
+Mask(XH3BEXTM) Var(riscv_xh3_subext)
+
+Mask(XH3SFX) Var(riscv_xh3_subext)
 

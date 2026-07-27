@@ -754,4 +754,12 @@
 @tab 1.0
 @tab SpacemiT vector dot product extension
 
+@item @samp{xh3bextm}
+@tab 1.0
+@tab Hazard3 bit extract multiple extension
+
+@item @samp{xh3sfx}
+@tab 1.0
+@tab Hazard3 soft float acceleration extension
+
 @end multitable
