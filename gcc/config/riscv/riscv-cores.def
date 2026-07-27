@@ -57,6 +57,7 @@ RISCV_TUNE("mips-p8700", mips_p8700, mips_p8700_tune_info)
 RISCV_TUNE("andes-25-series", andes_25_series, andes_25_tune_info)
 RISCV_TUNE("andes-23-series", andes_23_series, andes_23_tune_info)
 RISCV_TUNE("andes-45-series", andes_45_series, andes_45_tune_info)
+RISCV_TUNE("hazard3", generic, rocket_tune_info)
 
 #undef RISCV_TUNE
 
@@ -195,5 +196,11 @@ RISCV_CORE("andes-ax45",      "rv64imafdc_zicsr_zifencei_xandesperf", "andes-45-
 RISCV_CORE("spacemit-x60",    "rv64imafdcv_zba_zbb_zbc_zbs_zicboz_zicond_"
 			      "zbkc_zfh_zvfh_zvkt_zvl256b_sscofpmf_xsmtvdot",
 			      "spacemit-x60")
+RISCV_CORE("hazard3-rp2350",  "rv32ima_zicsr_zifencei_zba_zbb_zbs_zbkb_"
+			      "zca_zcb_zcmp",
+			      "hazard3")
+RISCV_CORE("hazard3-sim",     "rv32ima_zicsr_zifencei_zilsd_zba_zbb_zbs_zbkb_"
+			      "zbkx_zca_zcb_zclsd_zcmp_zibi",
+			      "hazard3")
 
 #undef RISCV_CORE
