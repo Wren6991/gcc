@@ -219,6 +219,86 @@
   "packw\t%0,%2,%1"
   [(set_attr "type" "crypto")])
 
+;; Unaligned SI load expanded using Zbkb pack/packh on little-endian RV32.
+;;
+;; The generic misaligned-load in expr.cc emits 4x lbu + 3x slli + 3x or (for a
+;; 32-bit load on RV32), and combine cannot easily lower the result to
+;; packh + pack.  Intercept the load and emit the optimal sequence directly.
+;;
+;; This routine handles *all* cases (including: RV64, big-endian, stores), since
+;; there is no suitable hook to communicate detailed applicability information
+;; to the caller. When no optimised expansion is available, it falls back to the
+;; generic bitfield helpers for correctness.
+
+(define_expand "movmisalignsi"
+  [(set (match_operand:SI 0 "nonimmediate_operand")
+	(match_operand:SI 1 "general_operand"))]
+  ""
+{
+  bool store_p = MEM_P (operands[0]);
+  rtx mem = store_p ? operands[0] : operands[1];
+  rtx reg = store_p ? operands[1] : operands[0];
+
+  /* Optimised RV32 little-endian load using Zbkb packh/pack.  */
+  if (!store_p
+      && TARGET_ZBKB
+      && !TARGET_64BIT
+      && !BYTES_BIG_ENDIAN
+      && MEM_P (mem))
+    {
+      /* RV32 LE, hword-aligned word load: 2x lhu + pack */
+      if (MEM_ALIGN (mem) >= 16)
+	{
+	  rtx h0 = gen_reg_rtx (SImode);
+	  rtx h1 = gen_reg_rtx (SImode);
+	  emit_insn (gen_zero_extendhisi2
+	    (h0, adjust_address (mem, HImode, 0)));
+	  emit_insn (gen_zero_extendhisi2
+	    (h1, adjust_address (mem, HImode, 2)));
+	  emit_insn (gen_riscv_pack_sihi (operands[0],
+					  gen_lowpart (HImode, h0),
+					  gen_lowpart (HImode, h1)));
+	  DONE;
+	}
+
+      /* RV32 LE, byte-aligned word load: 4x lbu + 2x packh + pack.  packh is
+         used to pair even/odd bytes, pack to pair even/odd halfwords. */
+      rtx b[4];
+      for (int i = 0; i < 4; ++i)
+	{
+	  rtx m = adjust_address (mem, QImode, i);
+	  b[i] = gen_reg_rtx (SImode);
+	  emit_insn (gen_zero_extendqisi2 (b[i], m));
+	}
+      rtx h0 = gen_reg_rtx (SImode);
+      rtx h1 = gen_reg_rtx (SImode);
+      emit_insn (gen_riscv_packh_si (h0,
+				     gen_lowpart (QImode, b[0]),
+				     gen_lowpart (QImode, b[1])));
+      emit_insn (gen_riscv_packh_si (h1,
+				     gen_lowpart (QImode, b[2]),
+				     gen_lowpart (QImode, b[3])));
+      emit_insn (gen_riscv_pack_sihi (operands[0],
+				      gen_lowpart (HImode, h0),
+				      gen_lowpart (HImode, h1)));
+      DONE;
+    }
+
+  /* Safe fallback for all other cases: (RV64 || BE || store || non-SI).
+     Delegate to the same generic bitfield routines as are used by
+     movmisalign call sites when optab_handler returns nothing. */
+  if (store_p)
+    store_bit_field (mem, GET_MODE_BITSIZE (SImode), 0, 0, 0,
+		     SImode, reg, false, false);
+  else
+    {
+      rtx result = extract_bit_field (mem, GET_MODE_BITSIZE (SImode), 0,
+				       1, NULL_RTX, SImode, SImode, false, NULL);
+      emit_move_insn (reg, result);
+    }
+  DONE;
+})
+
 ;; ZBKX extension
 
 (define_insn "riscv_xperm4_<mode>"
