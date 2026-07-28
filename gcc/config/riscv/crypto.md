@@ -299,6 +299,66 @@
   DONE;
 })
 
+;; Unaligned HI load expanded using Zbkb packh on little-endian RV32.
+;;
+;; Similar to movmisalignsi above: replace byte-aligned halfword load with a
+;; pattern that is compatible with our packh combine. Don't go directly to
+;; UNSPEC packh, as that would prevent propagation of known-zero bits and
+;; produce redundant zext.h instructions.
+
+(define_expand "movmisalignhi"
+  [(set (match_operand:HI 0 "nonimmediate_operand")
+	(match_operand:HI 1 "general_operand"))]
+  ""
+{
+  bool store_p = MEM_P (operands[0]);
+  rtx mem = store_p ? operands[0] : operands[1];
+  rtx reg = store_p ? operands[1] : operands[0];
+
+  /* Optimised RV32 little-endian load using Zbkb packh.  */
+  if (!store_p
+      && TARGET_ZBKB
+      && !TARGET_64BIT
+      && !BYTES_BIG_ENDIAN
+      && MEM_P (mem))
+    {
+      /* RV32 LE, byte-aligned halfword load: 2x lbu + packh.  */
+      rtx b[2];
+      for (int i = 0; i < 2; ++i)
+	{
+	  rtx m = adjust_address (mem, QImode, i);
+	  b[i] = gen_reg_rtx (SImode);
+	  emit_insn (gen_zero_extendqisi2 (b[i], m));
+	}
+      /* Emit the packh in its exposed (non-UNSPEC) form, matching
+	 *riscv_packh_<mode>_3. */
+      rtx h0 = gen_reg_rtx (SImode);
+      emit_insn (gen_rtx_SET (h0,
+	gen_rtx_IOR (SImode,
+	  gen_rtx_AND (SImode,
+	    gen_rtx_ASHIFT (SImode, b[1], GEN_INT (8)),
+	    GEN_INT (65280)),
+	  gen_rtx_ZERO_EXTEND (SImode,
+	    gen_lowpart (QImode, b[0])))));
+      emit_move_insn (operands[0], gen_lowpart (HImode, h0));
+      DONE;
+    }
+
+  /* Safe fallback for all other cases: (RV64 || BE || store || aligned).
+     Delegate to the same generic bitfield routines as are used by
+     movmisalign call sites when optab_handler returns nothing. */
+  if (store_p)
+    store_bit_field (mem, GET_MODE_BITSIZE (HImode), 0, 0, 0,
+		     HImode, reg, false, false);
+  else
+    {
+      rtx result = extract_bit_field (mem, GET_MODE_BITSIZE (HImode), 0,
+				       1, NULL_RTX, HImode, HImode, false, NULL);
+      emit_move_insn (reg, result);
+    }
+  DONE;
+})
+
 ;; ZBKX extension
 
 (define_insn "riscv_xperm4_<mode>"
