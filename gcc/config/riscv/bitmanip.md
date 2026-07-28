@@ -610,6 +610,73 @@
         (bswap:HI (match_operand:HI 1 "register_operand" "r")))]
   "TARGET_ZBB"
 {
+  /* Try to fold bswap16(packh(lo, hi)) into packh(hi, lo).  This targets
+     the exposed packh pattern emitted by movmisalignhi (unaligned u16 load),
+     which appears in the insn stream as:
+	(set lo (zero_extend (mem ...)))
+	(set hi (zero_extend (mem ...)))
+	(set w  (ior (and (ashift hi 8) 0xff00) (zero_extend (subreg lo))))
+	(set hi_reg (subreg w))  ; the operand we receive
+     and bswap16(lo | (hi<<8)) == hi | (lo<<8).  */
+  if (TARGET_ZBKB)
+    {
+      rtx target = operands[1];
+      if (SUBREG_P (target) && REG_P (SUBREG_REG (target)))
+	target = SUBREG_REG (target);
+
+      for (rtx_insn *insn = get_last_insn_anywhere (); insn;
+	   insn = PREV_INSN (insn))
+	{
+	  if (!INSN_P (insn))
+	    continue;
+	  rtx set = single_set (insn);
+	  if (!set || !rtx_equal_p (SET_DEST (set), target))
+	    break;
+
+	  /* Skip the subreg move from movmisalignhi:
+	     (set hi_reg (subreg si_reg)).  */
+	  if (SUBREG_P (SET_SRC (set)) && REG_P (SUBREG_REG (SET_SRC (set))))
+	    {
+	      target = SUBREG_REG (SET_SRC (set));
+	      continue;
+	    }
+
+	  /* Otherwise we expect the packh expression itself.  */
+	  rtx e = SET_SRC (set);
+	  if (GET_CODE (e) != IOR)
+	    break;
+	  rtx and_e = XEXP (e, 0);
+	  rtx zext_e = XEXP (e, 1);
+	  if (GET_CODE (and_e) != AND || GET_CODE (zext_e) != ZERO_EXTEND)
+	    break;
+	  rtx ashift_e = XEXP (and_e, 0);
+	  if (GET_CODE (ashift_e) != ASHIFT
+	      || !CONST_INT_P (XEXP (ashift_e, 1))
+	      || INTVAL (XEXP (ashift_e, 1)) != 8
+	      || !CONST_INT_P (XEXP (and_e, 1))
+	      || INTVAL (XEXP (and_e, 1)) != 65280)
+	    break;
+	  rtx orig_hi = XEXP (ashift_e, 0);
+	  rtx orig_lo = XEXP (zext_e, 0);
+	  if (!REG_P (orig_hi)
+	      || !SUBREG_P (orig_lo)
+	      || !REG_P (SUBREG_REG (orig_lo)))
+	    break;
+	    {
+	      /* Emit the swapped packh as a single recognized insn matching
+		 the exposed ior/and/ashift/zero_extend form.  Single insn
+		 means no REG_EQUAL note from expand_unop.  The exposed form
+		 (not an UNSPEC) lets combine see the known-zero upper bits
+		 through the subreg and elide any subsequent zext.h.  */
+	      emit_insn (gen_riscv_bswap16_fold_packh
+		(operands[0], SUBREG_REG (orig_lo),
+		 gen_lowpart (QImode, orig_hi)));
+	      DONE;
+	    }
+	  break;
+	}
+    }
+
   rtx tmp = gen_reg_rtx (word_mode);
   rtx newop1 = gen_lowpart (word_mode, operands[1]);
   if (TARGET_64BIT)
@@ -624,6 +691,21 @@
   emit_move_insn (operands[0], gen_lowpart (HImode, tmp1));
   DONE;
 })
+
+;; Carrier insn emitted by the bswaphi2 fold above.  It represents
+;;   bswap16 (packh (lo, hi))   [as emitted by movmisalignhi]
+
+(define_insn "riscv_bswap16_fold_packh"
+  [(set (match_operand:HI 0 "register_operand" "=r")
+	(subreg:HI
+	  (ior:SI (and:SI (ashift:SI (match_operand:SI 1 "register_operand" "r")
+				     (const_int 8))
+			  (const_int 65280))
+		  (zero_extend:SI (match_operand:QI 2 "register_operand" "r")))
+	  0))]
+  "TARGET_ZBKB"
+  "packh\t%0,%2,%1"
+  [(set_attr "type" "crypto")])
 
 (define_expand "<bitmanip_optab>di3"
   [(set (match_operand:DI 0 "register_operand" "=r")
