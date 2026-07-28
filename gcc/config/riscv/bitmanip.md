@@ -17,6 +17,10 @@
 ;; along with GCC; see the file COPYING3.  If not see
 ;; <http://www.gnu.org/licenses/>.
 
+(define_c_enum "unspec" [
+  UNSPEC_BSWAP32_LOAD_FOLD
+])
+
 ;; ZBA extension.
 
 (define_insn "*zero_extendsidi2_bitmanip"
@@ -489,8 +493,106 @@
      handle it.  */
   if (TARGET_64BIT && !TARGET_XTHEADBB)
     FAIL;
+
+  /* On RV32 with ZBKB, try to fold the 4x lbu + 2x packh + pack sequence
+     emitted by movmisalignsi.  bswap(pack(packh(b0,b1), packh(b2,b3)))
+     == pack(packh(b3,b2), packh(b1,b0))  */
+  if (TARGET_ZBKB && !TARGET_64BIT)
+    {
+      rtx src = operands[1];
+      if (SUBREG_P (src) && REG_P (SUBREG_REG (src)))
+	src = SUBREG_REG (src);
+
+      /* Walk back to find the pack that produced the bswap source.  */
+      rtx_insn *pack_insn = NULL;
+      rtx pack_set = NULL_RTX;
+      for (rtx_insn *insn = get_last_insn_anywhere (); insn;
+	   insn = prev_active_insn (insn))
+	{
+	  if (!INSN_P (insn))
+	    continue;
+	  rtx set = single_set (insn);
+	  if (!set)
+	    break;
+	  if (rtx_equal_p (SET_DEST (set), src)
+	      && SUBREG_P (SET_SRC (set))
+	      && REG_P (SUBREG_REG (SET_SRC (set))))
+	    {
+	      src = SUBREG_REG (SET_SRC (set));
+	      continue;
+	    }
+	  if (rtx_equal_p (SET_DEST (set), src)
+	      && GET_CODE (SET_SRC (set)) == UNSPEC
+	      && XINT (SET_SRC (set), 1) == UNSPEC_PACK)
+	    {
+	      pack_insn = insn;
+	      pack_set = set;
+	      break;
+	    }
+	  break;
+	}
+
+      if (pack_set)
+	{
+	  rtx pack_src = SET_SRC (pack_set);
+	  rtx h0_op = XVECEXP (pack_src, 0, 0);
+	  rtx h1_op = XVECEXP (pack_src, 0, 1);
+	  rtx h0_reg = SUBREG_P (h0_op) ? SUBREG_REG (h0_op) : h0_op;
+	  rtx h1_reg = SUBREG_P (h1_op) ? SUBREG_REG (h1_op) : h1_op;
+
+	  rtx_insn *ph1_insn = prev_active_insn (pack_insn);
+	  rtx_insn *ph0_insn = ph1_insn ? prev_active_insn (ph1_insn) : NULL;
+	  rtx ph1_set = ph1_insn ? single_set (ph1_insn) : NULL;
+	  rtx ph0_set = ph0_insn ? single_set (ph0_insn) : NULL;
+
+	  if (ph1_set && ph0_set
+	      && rtx_equal_p (SET_DEST (ph1_set), h1_reg)
+	      && rtx_equal_p (SET_DEST (ph0_set), h0_reg)
+	      && GET_CODE (SET_SRC (ph1_set)) == UNSPEC
+	      && XINT (SET_SRC (ph1_set), 1) == UNSPEC_PACKH
+	      && GET_CODE (SET_SRC (ph0_set)) == UNSPEC
+	      && XINT (SET_SRC (ph0_set), 1) == UNSPEC_PACKH)
+	    {
+	      rtx b0 = XVECEXP (SET_SRC (ph0_set), 0, 0);
+	      rtx b1 = XVECEXP (SET_SRC (ph0_set), 0, 1);
+	      rtx b2 = XVECEXP (SET_SRC (ph1_set), 0, 0);
+	      rtx b3 = XVECEXP (SET_SRC (ph1_set), 0, 1);
+
+	      emit_insn (gen_riscv_bswap32_load_fold (operands[0],
+						     b0, b1, b2, b3));
+	      DONE;
+	    }
+	}
+    }
 })
 
+;; Carrier insn emitted by the bswapsi2 fold above.  It represents
+;;   bswap (pack (packh (b0, b1), packh (b2, b3)))
+;; as a single insn so that expand_unop does not attach a REG_EQUAL note to a
+;; multi-insn result (which would reference the now-dead original pack chain).
+
+(define_insn_and_split "riscv_bswap32_load_fold"
+  [(set (match_operand:SI 0 "register_operand")
+        (unspec:SI
+          [(match_operand:QI 1 "register_operand")
+           (match_operand:QI 2 "register_operand")
+           (match_operand:QI 3 "register_operand")
+           (match_operand:QI 4 "register_operand")]
+          UNSPEC_BSWAP32_LOAD_FOLD))]
+  "TARGET_ZBKB && !TARGET_64BIT"
+  "#"
+  "&& 1"
+  [(const_int 0)]
+{
+  rtx new_h0 = gen_reg_rtx (SImode);
+  rtx new_h1 = gen_reg_rtx (SImode);
+  emit_insn (gen_riscv_packh_si (new_h0, operands[2], operands[1]));
+  emit_insn (gen_riscv_packh_si (new_h1, operands[4], operands[3]));
+  emit_insn (gen_riscv_pack_sihi (operands[0],
+                                  gen_lowpart (HImode, new_h1),
+                                  gen_lowpart (HImode, new_h0)));
+  DONE;
+})
 
 (define_insn "*bswap<mode>2"
   [(set (match_operand:X 0 "register_operand" "=r")
