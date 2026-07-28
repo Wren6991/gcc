@@ -12433,6 +12433,45 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
 	    set_mem_align (op0, BITS_PER_UNIT);
 	  }
 
+	/* If the field is a full-width, byte-aligned scalar whose only
+	   reason for being "misaligned" is struct packing, and the target
+	   provides a movmisalign expander for it, use that expander rather
+	   than falling back to bit-field extraction.  This mirrors the
+	   handling of misaligned MEM_REFs above (which calls
+	   expand_misaligned_mem_ref directly) and lets targets with a
+	   software workaround for unaligned scalar loads/stores apply it
+	   to packed-struct accesses too.  The byte-alignment and
+	   full-width guards ensure genuine sub-byte bitfields still take
+	   the bit-field path below.  */
+	if (MEM_P (op0)
+	    && modifier != EXPAND_MEMORY
+	    && modifier != EXPAND_WRITE
+	    && mode1 != VOIDmode && mode1 != BLKmode
+	    && known_eq (bitsize, GET_MODE_BITSIZE (mode1))
+	    && multiple_p (bitpos, BITS_PER_UNIT)
+	    && MEM_ALIGN (op0) < GET_MODE_ALIGNMENT (mode1)
+	    && optab_handler (movmisalign_optab, mode1) != CODE_FOR_nothing)
+	  {
+	    poly_uint64 mbytepos;
+	    gcc_assert (multiple_p (bitpos, BITS_PER_UNIT, &mbytepos));
+	    rtx mem = adjust_address (op0, mode1, mbytepos);
+	    mem = expand_misaligned_mem_ref (mem, mode1, unsignedp,
+					     MEM_ALIGN (op0),
+					     (modifier == EXPAND_STACK_PARM
+					      ? NULL_RTX : target), alt_rtl);
+	    if (reversep)
+	      mem = flip_storage_order (mode1, mem);
+	    mem = EXTEND_BITINT (mem);
+	    if (mode == mode1 || mode1 == tmode
+		|| modifier == EXPAND_CONST_ADDRESS
+		|| modifier == EXPAND_INITIALIZER)
+	      return mem;
+	    if (target == 0)
+	      target = gen_reg_rtx (tmode != VOIDmode ? tmode : mode);
+	    convert_move (target, mem, unsignedp);
+	    return target;
+	  }
+
 	/* In cases where an aligned union has an unaligned object
 	   as a field, we might be extracting a BLKmode value from
 	   an integer-mode (e.g., SImode) object.  Handle this case
