@@ -678,7 +678,8 @@
 ;; Keep this in sync with enum riscv_microarchitecture.
 (define_attr "tune"
   "generic,sifive_7,sifive_p400,sifive_p600,xiangshan,generic_ooo,mips_p8700,
-   tt_ascalon_d8,andes_25_series,andes_23_series,andes_45_series,spacemit_x60"
+   tt_ascalon_d8,andes_25_series,andes_23_series,andes_45_series,spacemit_x60,
+   hazard3"
   (const (symbol_ref "((enum attr_tune) riscv_microarchitecture)")))
 
 ;; Describe a user's asm statement.

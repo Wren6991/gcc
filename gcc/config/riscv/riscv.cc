@@ -837,6 +837,36 @@ static const struct riscv_tune_param andes_45_tune_info = {
   true,						/* prefer-agnostic.  */
 };
 
+/* Costs to use when optimizing for Hazard3.  Reflects the default
+   M-extension configuration (MULDIV_UNROLL=2, MUL_FAST=1, MUL_FASTER=1,
+   MULH_FAST=1): 1-cycle multiply, 17-19 cycle divide.  All integer ALU
+   and bitmanip instructions are single-cycle.  Branches are 1-2 cycles
+   with a minimal predictor, so keep the branch cost low.
+   Unaligned accesses are not supported in hardware.  */
+static const struct riscv_tune_param hazard3_tune_info = {
+  {COSTS_N_INSNS (4), COSTS_N_INSNS (5)},	/* fp_add */
+  {COSTS_N_INSNS (4), COSTS_N_INSNS (5)},	/* fp_mul */
+  {COSTS_N_INSNS (20), COSTS_N_INSNS (20)},	/* fp_div */
+  {COSTS_N_INSNS (1), COSTS_N_INSNS (1)},	/* int_mul */
+  {COSTS_N_INSNS (17), COSTS_N_INSNS (17)},	/* int_div */
+  1,						/* issue_rate */
+  2,						/* branch_cost */
+  2,						/* memory_cost */
+  8,						/* fmv_cost */
+  true,						/* slow_unaligned_access */
+  false,					/* vector_unaligned_access */
+  false,					/* use_divmod_expansion */
+  false,					/* overlap_op_by_pieces */
+  false,					/* use_zero_stride_load */
+  false,					/* speculative_sched_vsetvl */
+  RISCV_FUSE_NOTHING,				/* fusible_ops */
+  NULL,						/* vector cost */
+  NULL,						/* function_align */
+  NULL,						/* jump_align */
+  NULL,						/* loop_align */
+  false,					/* prefer-agnostic.  */
+};
+
 static bool riscv_avoid_shrink_wrapping_separate ();
 static tree riscv_handle_fndecl_attribute (tree *, tree, tree, int, bool *);
 static tree riscv_handle_type_attribute (tree *, tree, tree, int, bool *);
