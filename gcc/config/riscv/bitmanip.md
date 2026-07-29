@@ -707,6 +707,59 @@
   "packh\t%0,%2,%1"
   [(set_attr "type" "crypto")])
 
+;; packh followed by redundant zext.h: created by extending bswaphi2, hard to
+;; eliminate without emitting multiple instructions from the expander, which
+;; causes a dangling REG_EQUAL note. Just do best-effort cleanup.
+(define_peephole2
+  [(set (match_operand:X 0 "register_operand")
+	(ior:X (and:X (ashift:X (match_operand:X 1 "register_operand")
+				(const_int 8))
+		      (const_int 65280))
+	      (zero_extend:X (match_operand:QI 2 "register_operand"))))
+   (set (match_operand:X 3 "register_operand")
+	(zero_extend:X (match_operand:HI 4 "register_operand")))]
+  "TARGET_ZBKB
+   && REG_P (operands[0]) && REG_P (operands[3]) && REG_P (operands[4])
+   && REGNO (operands[0]) == REGNO (operands[4])
+   && (REGNO (operands[3]) == REGNO (operands[0])
+       || peep2_reg_dead_p (2, operands[4]))"
+  [(const_int 0)]
+  {
+    rtx packh
+      = gen_rtx_SET (operands[0],
+	  gen_rtx_IOR (<X:MODE>mode,
+	    gen_rtx_AND (<X:MODE>mode,
+	      gen_rtx_ASHIFT (<X:MODE>mode, operands[1], GEN_INT (8)),
+	      GEN_INT (65280)),
+	    gen_rtx_ZERO_EXTEND (<X:MODE>mode, operands[2])));
+    emit_insn (packh);
+    if (REGNO (operands[3]) != REGNO (operands[0]))
+      emit_insn (gen_rtx_SET (operands[3], operands[0]));
+    DONE;
+  })
+
+;; Same packh -> zext.h shape but both outputs are live: replace zext.h with a
+;; move. It can often be completely eliminated later by cprop_hardreg. If not,
+;; the compression is still better.
+(define_peephole2
+  [(set (match_operand:X 0 "register_operand")
+	(ior:X (and:X (ashift:X (match_operand:X 1 "register_operand")
+				(const_int 8))
+		      (const_int 65280))
+	      (zero_extend:X (match_operand:QI 2 "register_operand"))))
+   (set (match_operand:X 3 "register_operand")
+	(zero_extend:X (match_operand:HI 4 "register_operand")))]
+  "TARGET_ZBKB
+   && REG_P (operands[0]) && REG_P (operands[3]) && REG_P (operands[4])
+   && REGNO (operands[0]) == REGNO (operands[4])
+   && REGNO (operands[3]) != REGNO (operands[0])
+   && !peep2_reg_dead_p (2, operands[4])"
+  [(set (match_dup 0)
+	(ior:X (and:X (ashift:X (match_dup 1) (const_int 8))
+		      (const_int 65280))
+	      (zero_extend:X (match_dup 2))))
+   (set (match_dup 3) (match_dup 0))])
+
 (define_expand "<bitmanip_optab>di3"
   [(set (match_operand:DI 0 "register_operand" "=r")
         (bitmanip_minmax:DI (match_operand:DI 1 "register_operand" "r")
