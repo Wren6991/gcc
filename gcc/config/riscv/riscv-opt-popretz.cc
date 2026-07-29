@@ -85,7 +85,9 @@ public:
 
   virtual bool gate (function *)
     {
-      return TARGET_ZCMP && !frame_pointer_needed;
+      return TARGET_ZCMP
+	&& (!frame_pointer_needed
+	    || global_options.x_flag_omit_frame_pointer);
     }
 
   virtual unsigned int execute (function *);

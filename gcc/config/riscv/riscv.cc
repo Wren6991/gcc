@@ -8650,7 +8650,8 @@ riscv_save_reg_p (unsigned int regno)
 static bool
 riscv_avoid_multi_push (const struct riscv_frame_info *frame)
 {
-  if (!TARGET_ZCMP || crtl->calls_eh_return || frame_pointer_needed
+  if (!TARGET_ZCMP || crtl->calls_eh_return
+      || (frame_pointer_needed && !global_options.x_flag_omit_frame_pointer)
       || cfun->machine->interrupt_handler_p || cfun->machine->varargs_size != 0
       || crtl->args.pretend_args_size != 0
       || (use_shrink_wrapping_separate ()
@@ -10041,11 +10042,25 @@ riscv_adjust_multi_pop_cfi_epilogue (int saved_size)
   if (mask & S10_MASK)
     mask |= S11_MASK;
 
-  /* Debug info for adjust sp.  */
-  adjust_sp_rtx
-    = gen_rtx_SET (stack_pointer_rtx,
-		   plus_constant (Pmode, stack_pointer_rtx, saved_size));
-  dwarf = alloc_reg_note (REG_CFA_ADJUST_CFA, adjust_sp_rtx, dwarf);
+  if (frame_pointer_needed)
+    {
+      /* The body's CFA rule is fp-based, but on reaching cm.pop* the frame
+	 pointer may already be clobbered. If an IRQ occurs after the lw s0
+	 but before completion, there is no rollback of s0; the only
+	 guarantee is that sp is not adjusted.  Therefore set frame address
+	 to sp + saved_size. */
+      adjust_sp_rtx = gen_rtx_PLUS (Pmode, stack_pointer_rtx,
+				    gen_int_mode (saved_size, Pmode));
+      dwarf = alloc_reg_note (REG_CFA_DEF_CFA, adjust_sp_rtx, dwarf);
+    }
+  else
+    {
+      /* Debug info for adjust sp.  */
+      adjust_sp_rtx
+	= gen_rtx_SET (stack_pointer_rtx,
+		       plus_constant (Pmode, stack_pointer_rtx, saved_size));
+      dwarf = alloc_reg_note (REG_CFA_ADJUST_CFA, adjust_sp_rtx, dwarf);
+    }
 
   for (int regno = GP_REG_FIRST; regno <= GP_REG_LAST; regno++)
     if (BITSET_P (mask, regno - GP_REG_FIRST))
@@ -10081,11 +10096,11 @@ riscv_adjust_libcall_cfi_epilogue ()
   return dwarf;
 }
 
-static void
+static rtx_insn *
 riscv_gen_multi_pop_insn (bool use_multi_pop_normal, unsigned mask,
 			  unsigned multipop_size)
 {
-  rtx insn;
+  rtx_insn *insn;
   unsigned regs_count = riscv_multi_push_regs_count (mask);
 
   if (!use_multi_pop_normal)
@@ -10098,6 +10113,8 @@ riscv_gen_multi_pop_insn (bool use_multi_pop_normal, unsigned mask,
   rtx dwarf = riscv_adjust_multi_pop_cfi_epilogue (multipop_size);
   RTX_FRAME_RELATED_P (insn) = 1;
   REG_NOTES (insn) = dwarf;
+
+  return insn;
 }
 
 /* Expand an "epilogue", "sibcall_epilogue", or "eh_return_internal" pattern;
@@ -10121,6 +10138,7 @@ riscv_expand_epilogue (int style)
     = ((style == NORMAL_RETURN) && riscv_use_multi_push (frame));
   bool use_multi_pop_sibcall
     = ((style == SIBCALL_RETURN) && riscv_use_multi_push (frame));
+  rtx_insn *multi_pop_insn = nullptr;
   bool use_multi_pop = use_multi_pop_normal || use_multi_pop_sibcall;
 
   bool use_restore_libcall
@@ -10389,8 +10407,8 @@ riscv_expand_epilogue (int style)
       /* Undo the above fib.  */
       frame->mask = mask;
       frame->fmask = fmask;
-      riscv_gen_multi_pop_insn (use_multi_pop_normal, frame->mask,
-				multipop_size);
+      multi_pop_insn = riscv_gen_multi_pop_insn (use_multi_pop_normal,
+						 frame->mask, multipop_size);
       if (use_multi_pop_normal)
 	return;
     }
@@ -10419,6 +10437,23 @@ riscv_expand_epilogue (int style)
 	emit_insn (gen_sspopchk (Pmode, t0));
       else
 	emit_insn (gen_sspopchk (Pmode, ra));
+    }
+
+  /* For a plain (non-return) cm.pop, sp is back at its entry value once the
+     pop has completed, so the rest of the epilogue (e.g. a tail call) is
+     described by CFA = sp + 0.  This only differs from the rule set at the
+     pop itself (sp + saved_size, valid at the pop's interrupted pc) for
+     instructions emitted after the pop, so attach it to the following
+     instruction.  */
+  if (use_multi_pop_sibcall)
+    {
+      if (rtx_insn *after = next_nonnote_nondebug_insn (multi_pop_insn))
+	{
+	  rtx sp_cfa = gen_rtx_PLUS (Pmode, stack_pointer_rtx, const0_rtx);
+	  REG_NOTES (after)
+	    = alloc_reg_note (REG_CFA_DEF_CFA, sp_cfa, REG_NOTES (after));
+	  RTX_FRAME_RELATED_P (after) = 1;
+	}
     }
 
   /* Return from interrupt.  */
