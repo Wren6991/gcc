@@ -218,6 +218,9 @@ pass_combine_popretz::execute (function *fn)
 	{
 	  if (!INSN_P (def_insn))
 	    continue;
+	  /* a0 is not preserved across calls:  */
+	  if (CALL_P (def_insn))
+	    break;
 	  rtx def_pat = PATTERN (def_insn);
 	  if (GET_CODE (def_pat) == USE
 	      && REG_P (XEXP (def_pat, 0))
