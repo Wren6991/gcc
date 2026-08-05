@@ -43,6 +43,124 @@
   [(set_attr "type" "bitmanip")
    (set_attr "mode" "<X:MODE>")])
 
+; (x << n) | (y & mask), where n is in [1,3] and mask < (1<<n), is
+; sh[123]add(x, y & mask): no overlap, so OR is equivalent to ADD.
+(define_insn_and_split "*shnadd_ior_mask"
+  [(set (match_operand:X 0 "register_operand" "=r")
+	(ior:X (ashift:X (match_operand:X 1 "register_operand" "r")
+			 (match_operand:QI 2 "imm123_operand" "Ds3"))
+	       (and:X (match_operand:X 3 "register_operand" "r")
+		      (match_operand 4 "immediate_operand" "n"))))]
+  "TARGET_ZBA
+   && (UINTVAL (operands[4]) >> INTVAL (operands[2])) == 0"
+  "#"
+  "&& 1"
+  [(const_int 0)]
+{
+  rtx tmp = gen_reg_rtx (<X:MODE>mode);
+  emit_insn (gen_rtx_SET (tmp,
+			  gen_rtx_AND (<X:MODE>mode, operands[3], operands[4])));
+  emit_insn (gen_rtx_SET (operands[0],
+			  gen_rtx_PLUS (<X:MODE>mode,
+					gen_rtx_ASHIFT (<X:MODE>mode,
+						       operands[1], operands[2]),
+					tmp)));
+  DONE;
+}
+  [(set_attr "type" "bitmanip")
+   (set_attr "mode" "<X:MODE>")])
+
+(define_insn_and_split "*shnadd_ior_mask_swapped"
+  [(set (match_operand:X 0 "register_operand" "=r")
+	(ior:X (and:X (match_operand:X 3 "register_operand" "r")
+		      (match_operand 4 "immediate_operand" "n"))
+	       (ashift:X (match_operand:X 1 "register_operand" "r")
+			 (match_operand:QI 2 "imm123_operand" "Ds3"))))]
+  "TARGET_ZBA
+   && (UINTVAL (operands[4]) >> INTVAL (operands[2])) == 0"
+  "#"
+  "&& 1"
+  [(const_int 0)]
+{
+  rtx tmp = gen_reg_rtx (<X:MODE>mode);
+  emit_insn (gen_rtx_SET (tmp,
+			  gen_rtx_AND (<X:MODE>mode, operands[3], operands[4])));
+  emit_insn (gen_rtx_SET (operands[0],
+			  gen_rtx_PLUS (<X:MODE>mode,
+					gen_rtx_ASHIFT (<X:MODE>mode,
+						       operands[1], operands[2]),
+					tmp)));
+  DONE;
+}
+  [(set_attr "type" "bitmanip")
+   (set_attr "mode" "<X:MODE>")])
+
+; (x << n) & (a << n) | (y & b), with n in [1,3] and b < (1<<n), is
+; sh[123]add(x & a, y & b). Same as above but with post-shift mask.
+(define_insn_and_split "*shnadd_ior_shiftmask"
+  [(set (match_operand:X 0 "register_operand" "=r")
+	(ior:X (and:X (ashift:X (match_operand:X 1 "register_operand" "r")
+				(match_operand:QI 2 "imm123_operand" "Ds3"))
+		      (match_operand 3 "immediate_operand" "n"))
+	       (and:X (match_operand:X 4 "register_operand" "r")
+		      (match_operand 5 "immediate_operand" "n"))))]
+  "TARGET_ZBA
+   && (UINTVAL (operands[3]) >> INTVAL (operands[2])) != 0
+   && (UINTVAL (operands[5]) >> INTVAL (operands[2])) == 0"
+  "#"
+  "&& 1"
+  [(const_int 0)]
+{
+  rtx t1 = gen_reg_rtx (<X:MODE>mode);
+  rtx t2 = gen_reg_rtx (<X:MODE>mode);
+  emit_insn (gen_rtx_SET (t1,
+			  gen_rtx_AND (<X:MODE>mode, operands[1],
+				       GEN_INT (UINTVAL (operands[3])
+						>> INTVAL (operands[2])))));
+  emit_insn (gen_rtx_SET (t2,
+			  gen_rtx_AND (<X:MODE>mode, operands[4], operands[5])));
+  emit_insn (gen_rtx_SET (operands[0],
+			  gen_rtx_PLUS (<X:MODE>mode,
+					gen_rtx_ASHIFT (<X:MODE>mode,
+						       t1, operands[2]),
+					t2)));
+  DONE;
+}
+  [(set_attr "type" "bitmanip")
+   (set_attr "mode" "<X:MODE>")])
+
+(define_insn_and_split "*shnadd_ior_shiftmask_swapped"
+  [(set (match_operand:X 0 "register_operand" "=r")
+	(ior:X (and:X (match_operand:X 4 "register_operand" "r")
+		      (match_operand 5 "immediate_operand" "n"))
+	       (and:X (ashift:X (match_operand:X 1 "register_operand" "r")
+				(match_operand:QI 2 "imm123_operand" "Ds3"))
+		      (match_operand 3 "immediate_operand" "n"))))]
+  "TARGET_ZBA
+   && (UINTVAL (operands[3]) >> INTVAL (operands[2])) != 0
+   && (UINTVAL (operands[5]) >> INTVAL (operands[2])) == 0"
+  "#"
+  "&& 1"
+  [(const_int 0)]
+{
+  rtx t1 = gen_reg_rtx (<X:MODE>mode);
+  rtx t2 = gen_reg_rtx (<X:MODE>mode);
+  emit_insn (gen_rtx_SET (t1,
+			  gen_rtx_AND (<X:MODE>mode, operands[1],
+				       GEN_INT (UINTVAL (operands[3])
+						>> INTVAL (operands[2])))));
+  emit_insn (gen_rtx_SET (t2,
+			  gen_rtx_AND (<X:MODE>mode, operands[4], operands[5])));
+  emit_insn (gen_rtx_SET (operands[0],
+			  gen_rtx_PLUS (<X:MODE>mode,
+					gen_rtx_ASHIFT (<X:MODE>mode,
+						       t1, operands[2]),
+					t2)));
+  DONE;
+}
+  [(set_attr "type" "bitmanip")
+   (set_attr "mode" "<X:MODE>")])
+
 ; When using strength-reduction, we will reduce a multiplication to a
 ; sequence of shifts and adds.  If this is performed with 32-bit types
 ; and followed by a division, the lack of w-form sh[123]add will make
